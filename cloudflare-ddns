@@ -1,9 +1,11 @@
 #!/bin/bash
 # 2019/12/9  - TRCM - Initial create from tunnelbroker-update
 # 2019/12/11 - TRCM - Add force update parameter
-# 2012/12/11 - TRCM - Bash v4 associative arrays for no real reason
+# 2019/12/11 - TRCM - Bash v4 associative arrays for no real reason
+# 2020/01/11 - TRCM - Add a retry if we can't resolve api.cloudflare.com
 
-# Edit these with your Cloudflare login email address and global key
+# Either use a ./credentials file in the same directory to set the following
+# four variables, or edit them directly below to match your Cloudflare details
 LOGIN='email@example.com'
 GLOBAL_KEY='0A1B2C3D4D5F6A7B8C9D'
 # Edit this to refer to the DNS zone you're updating records for
@@ -18,9 +20,9 @@ RECORD_NAMES=(
 # Probably no need to edit below here ...
 # shellcheck disable=SC1090
 if [[ -f $(dirname "$0")/credentials ]]; then
-    #FIXME - do we want to : set -o allexport, source, set +o allexport ?
-    # shellcheck disable=SC1091
+    set -o allexport
     source "$(dirname "$0")/credentials"
+    set +o allexport
 fi
 CURLOPTS="--ipv4 --location --max-time 15 --silent --show-error"
 IPCHECKERS=(
@@ -28,6 +30,7 @@ IPCHECKERS=(
         'http://icanhazip.com'
         'http://dns.loopia.se/checkip/checkip.php'
     )
+RETRIES=3
 LOGFILE=/tmp/$(basename "$0").out
 WAN_IPOLD=$(tail -1 "$0" | sed 's/\t.*//')
 [ "$1" ] && VERBOSE="true"
@@ -70,13 +73,18 @@ function cloudflare_check {
     ZONE_ID=$(
         curl $CURLOPTS -X GET \
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" \
-        -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" \
+        -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
         | grep -Po '(?<="id":")[^"]*' \
         | head -1
     )
     echo "ZONE_ID: ${ZONE_ID}" >> "$LOGFILE"
-    if [[ "$ZONE_ID" == "" ]]; then
-        echo "Failed to translate zone name ($ZONE_NAME) to ID"
+    if [[ "$ZONE_ID" == "" ]] && [[ $RETRIES -gt 1 ]]; then
+        # Something didn't work, try again in a bit?
+        RETRIES=$((RETRIES-1))
+        sleep 10
+        cloudflare_check "$1" "$2" "$3" "$4"
+    elif [[ "$ZONE_ID" == "" ]]; then
+        echo "Failed to translate zone ($ZONE_NAME) to ID"
         exit 1
     fi
 
@@ -86,11 +94,16 @@ function cloudflare_check {
         RECORD_NAMES["$RECORD_NAME"]=$(
             curl $CURLOPTS -X GET \
             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=A&name=$RECORD_NAME" \
-            -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" \
+            -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
             | grep -Po '(?<="id":")[^"]*'
         )
-        if [[ "${RECORD_NAMES[$RECORD_NAME]}" == "" ]]; then
-            echo "Failed to translate 'A' record name ($RECORD_NAME) to ID"
+        if [[ "${RECORD_NAMES[$RECORD_NAME]}" == "" ]] && [[ $RETRIES -gt 1 ]]; then
+            # Something didn't work, try again in a bit?
+            RETRIES=$((RETRIES-1))
+            sleep 10
+            cloudflare_check "$1" "$2" "$3" "$4"
+        elif [[ "${RECORD_NAMES[$RECORD_NAME]}" == "" ]]; then
+            echo "Failed to translate 'A' record ($RECORD_NAME) to ID"
             exit 1
         else
             echo "RECORD_ID($RECORD_NAME): ${RECORD_NAMES[$RECORD_NAME]}" >> "$LOGFILE"
@@ -204,11 +217,11 @@ sanity_check
 # Try to get our current WAN IP address
 WAN_IP=$(findwanip)
 
-# Check Cloudflare knows about us
-cloudflare_check "$LOGIN" "$GLOBAL_KEY" "$ZONE_NAME" "$RECORD_NAME"
-
-# If we get this far, we can tell Cloudflare our new WAN IP
+# If our WAN IP address has changed, we need to try to update Cloudflare
 if [[ "$WAN_IP" != "$WAN_IPOLD" ]] || [[ "$FORCE" == "true" ]]; then
+    # Check Cloudflare knows about us
+    cloudflare_check "$LOGIN" "$GLOBAL_KEY" "$ZONE_NAME" "$RECORD_NAME"
+    # Now tell Cloudflare to update each of our records with the new IP address
     for RECORD_NAME in "${!RECORD_NAMES[@]}"; do
         cloudflare_update "$LOGIN" "$GLOBAL_KEY" "$ZONE_ID" "${RECORD_NAMES[$RECORD_NAME]}" "$RECORD_NAME" "$WAN_IP"
     done
@@ -516,3 +529,10 @@ exit
 90.200.19.26	# 2019/10/08 09:21:55 BST
 90.207.43.214	# 2019/12/09 17:45:05 GMT
 90.199.88.170	# 2019/12/11 23:29:59 GMT
+90.199.91.220	# 2019/12/16 16:30:13 GMT
+90.207.43.218	# 2019/12/21 23:30:06 GMT
+90.207.7.146	# 2019/12/27 06:00:07 GMT
+90.207.6.102	# 2020/01/01 10:45:06 GMT
+90.207.150.239	# 2020/01/06 14:45:06 GMT
+90.207.15.174	# 2020/01/09 03:15:06 GMT
+90.194.113.53	# 2020/01/13 09:30:15 GMT
