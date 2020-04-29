@@ -57,6 +57,7 @@ function sanity_check {
     command -V grep >/dev/null 2>&1 || { echo "No grep available!"; exit 1; }
     command -V tail >/dev/null 2>&1 || { echo "No tail available!"; exit 1; }
     command -V sed  >/dev/null 2>&1 || { echo "No sed available!"; exit 1; }
+    command -V jq  >/dev/null 2>&1 || { echo "No jq available!"; exit 1; }
 }
 
 
@@ -74,8 +75,7 @@ function cloudflare_check {
         curl $CURLOPTS -X GET \
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" \
         -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
-        | grep -Po '(?<="id":")[^"]*' \
-        | head -1
+        | jq '.result[0].id'
     )
     echo "ZONE_ID: ${ZONE_ID}" >> "$LOGFILE"
     if [[ "$ZONE_ID" == "" ]] && [[ $RETRIES -gt 1 ]]; then
@@ -95,7 +95,7 @@ function cloudflare_check {
             curl $CURLOPTS -X GET \
             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=A&name=$RECORD_NAME" \
             -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
-            | grep -Po '(?<="id":")[^"]*'
+            | jq '.result[0].id'
         )
         if [[ "${RECORD_NAMES[$RECORD_NAME]}" == "" ]] && [[ $RETRIES -gt 1 ]]; then
             # Something didn't work, try again in a bit?
