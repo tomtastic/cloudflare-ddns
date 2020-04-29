@@ -75,7 +75,7 @@ function cloudflare_check {
         curl $CURLOPTS -X GET \
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" \
         -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
-        | jq '.result[0].id'
+        | jq -r '.result[0].id'
     )
     echo "ZONE_ID: ${ZONE_ID}" >> "$LOGFILE"
     if [[ "$ZONE_ID" == "" ]] && [[ $RETRIES -gt 1 ]]; then
@@ -95,7 +95,7 @@ function cloudflare_check {
             curl $CURLOPTS -X GET \
             "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=A&name=$RECORD_NAME" \
             -H "$HEADER_LOGIN" -H "$HEADER_KEY" -H "$HEADER_TYPE" 2>&1 \
-            | jq '.result[0].id'
+            | jq -r '.result[0].id'
         )
         if [[ "${RECORD_NAMES[$RECORD_NAME]}" == "" ]] && [[ $RETRIES -gt 1 ]]; then
             # Something didn't work, try again in a bit?
@@ -144,7 +144,7 @@ function cloudflare_update {
         --data "{\"id\":\"$ZONE_ID\",\"type\":\"A\",\"name\":\"$RECORD_NAME\",\"content\":\"$WAN_IP\"}" 2>&1)
     # shellcheck disable=SC2181
     if [[ $? -ne 0 ]] || [[ "$RESPONSE" =~ '"success":false' ]]; then
-        echo "$RESPONSE" >>"$LOGFILE"
+        echo "$RESPONSE" | jq -M '.' >>"$LOGFILE"
         [[ $VERBOSE ]] && echo " ! Updating Cloudflare with our new IP failed" && exit 3
         exit 3
     else
